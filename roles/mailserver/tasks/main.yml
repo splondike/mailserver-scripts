@@ -1,0 +1,142 @@
+---
+- name: Update packages
+  apt: update_cache=yes upgrade=yes
+- name: Install required packages
+  apt: name={{ item }} state=latest
+  with_items:
+   - makepasswd
+   - postfix
+   - postfix-mysql
+   - dovecot-core
+   - dovecot-imapd
+   - dovecot-mysql
+   - python-mysqldb
+   - mysql-server
+   - dovecot-lmtpd
+   - opendkim
+   - opendkim-tools
+   - dovecot-antispam
+   - postfix-pcre
+   - dovecot-sieve
+   - solr-tomcat
+   - dovecot-solr
+# Mailstore stuff
+# TODO: Make /etc/mailname file which contains the A record name
+- name: Make dovecot subdirectory in filesystem
+  file: path=/var/mailstore/dovecot state=directory group=mail mode=770
+# MySQL stuff
+- name: Generate root password for mysql
+  command: makepasswd
+  register: mysql_root_password
+- name: Set mysql root password
+  mysql_user: name=root password={{mysql_root_password.stdout_lines[0]}} state=present
+- name: Create .my.cnf file
+  template: src=my.cnf.j2 dest=/root/.my.cnf
+- name: Create mail users database
+  mysql_db: name=mailserver state=present
+- name: Copy table setup script to machine
+  template: src=mailserver-tables.sql dest=/tmp/mailserver-tables.sql
+- name: Run table setup script
+  shell: mysql mailserver < /tmp/mailserver-tables.sql
+- name: Generate user password for mysql
+  command: makepasswd
+  register: mysql_mailserver_password
+- name: Create mailserver user in mysql
+  mysql_user: name=mailserver password={{mysql_mailserver_password.stdout_lines[0]}} priv=mailserver.*:SELECT
+# Dovecot
+- name: Generate certificates for mail server
+  command: openssl req -new -x509 -days 1000 -nodes -subj "/C=AU/ST=Victoria/L=Melbourne/O=IT/CN={{mailserver_name}}" -out "/etc/ssl/certs/dovecot.pem" -keyout "/etc/ssl/private/dovecot.pem" creates=/etc/ssl/private/dovecot.pem
+- name: Set Dovecot mail box location
+  lineinfile: dest=/etc/dovecot/conf.d/10-mail.conf regexp='^mail_location' line='mail_location = maildir:/var/mailstore/dovecot'
+  notify: restart dovecot
+- name: Set Dovecot mail box location
+  lineinfile: dest=/etc/dovecot/conf.d/10-mail.conf line='first_valid_uid = 0'
+  notify: restart dovecot
+- name: Set Dovecot allowed auth mechanisms
+  lineinfile: dest=/etc/dovecot/conf.d/10-auth.conf regexp='^auth_mechanisms' line='auth_mechanisms = plain login'
+  notify: restart dovecot
+- name: Disable system users for Dovecot
+  lineinfile: dest=/etc/dovecot/conf.d/10-auth.conf regexp='auth-system.conf.ext' state=absent
+  notify: restart dovecot
+- name: Enable MySql users for Dovecot
+  lineinfile: dest=/etc/dovecot/conf.d/10-auth.conf line='!include auth-sql.conf.ext'
+  notify: restart dovecot
+- name: Update SQL auth config file number one
+  copy: src=auth-sql.conf.ext dest=/etc/dovecot/conf.d/auth-sql.conf.ext
+  notify: restart dovecot
+- name: Update SQL auth config file number two
+  template: src=dovecot-sql.conf.ext.j2 dest=/etc/dovecot/dovecot-sql.conf.ext
+  notify: restart dovecot
+- name: Replace master config to lock down non-tls ports 
+  copy: src=10-master.conf dest=/etc/dovecot/conf.d/10-master.conf
+  notify: restart dovecot
+- name: Update Dovecot SSL pubkey location
+  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf regexp='^ssl_cert' line='ssl_cert = </etc/ssl/certs/dovecot.pem'
+- name: Update Dovecot SSL privkey location
+  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf regexp='^ssl_key' line='ssl_key = </etc/ssl/private/dovecot.pem'
+- name: Force SSL in Dovecot
+  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf line='ssl = required'
+  notify: restart dovecot
+- name: Set postmaster address in Dovecot
+  lineinfile: dest=/etc/dovecot/conf.d/15-lda.conf regexp='#?postmaster_address' line='postmaster_address = postmaster@{{mail_domain}}'
+  notify: restart dovecot
+- name: Set hostname in Dovecot
+  lineinfile: dest=/etc/dovecot/conf.d/15-lda.conf regexp='#?hostname' line='hostname = {{mail_domain}}'
+  notify: restart dovecot
+- name: Disable systemd wake dovecot on port connect
+  command: systemctl disable dovecot.socket
+# Postfix
+- name: Set Postfix configuration
+  template: src=postfix.main.cf dest=/etc/postfix/main.cf
+  notify: restart postfix
+- name: Set Postfix services
+  copy: src=master.cf dest=/etc/postfix/master.cf
+  notify: restart postfix
+- name: Add Postfix->Mysql domains bridge
+  template: src=mysql-virtual-mailbox-domains.cf.j2 dest=/etc/postfix/mysql-virtual-mailbox-domains.cf
+  notify: restart postfix
+- name: Add Postfix->Mysql mailboxes bridge
+  template: src=mysql-virtual-mailbox-maps.cf.j2 dest=/etc/postfix/mysql-virtual-mailbox-maps.cf
+  notify: restart postfix
+- name: Add Postfix->Mysql aliases bridge
+  template: src=mysql-virtual-alias-maps.cf.j2 dest=/etc/postfix/mysql-virtual-alias-maps.cf
+  notify: restart postfix
+# OpenDKIM
+- name: Create OpenDKIM certs dir
+  file: path=/etc/opendkim state=directory mode=770 owner=opendkim group=opendkim
+  notify: restart opendkim
+- name: Generate OpenDKIM certs
+  command: opendkim-genkey -r -h sha256 -d {{mail_domain}} -s mail -D /etc/opendkim creates=/etc/opendkim/mail.private
+  notify: restart opendkim
+- name: Correct ownership on OpenDKIM keys
+  file: path=/etc/opendkim state=directory recurse=yes mode=770 owner=opendkim group=opendkim
+- name: Copy OpenDKIM key table
+  template: src=KeyTable dest=/etc/opendkim/KeyTable owner=opendkim group=opendkim
+  notify: restart opendkim
+- name: Copy OpenDKIM signing table
+  template: src=SigningTable dest=/etc/opendkim/SigningTable owner=opendkim group=opendkim
+  notify: restart opendkim
+- name: Copy OpenDKIM trusted hosts
+  copy: src=TrustedHosts dest=/etc/opendkim/TrustedHosts owner=opendkim group=opendkim
+  notify: restart opendkim
+- name: Copy OpenDKIM configuration
+  copy: src=opendkim.conf dest=/etc/opendkim.conf
+  notify: restart opendkim
+# Solr
+- name: Copy Solr schema (sourced from dovecot)
+  copy: src=solr-schema.xml dest=/etc/solr/conf/schema.xml
+  notify: restart tomcat
+- name: Create index directory for solr
+  file: path=/var/mailstore/solr state=directory owner=tomcat7 group=tomcat7
+- name: Disable access to Solr for machines other than localhost
+  copy: src=server.xml dest=/etc/tomcat7/server.xml
+  notify: restart tomcat
+- name: Correct index directory for Solr
+  lineinfile: dest=/etc/solr/conf/solrconfig.xml regexp='^( *)<dataDir>' line='\1<dataDir>/var/mailstore/solr</dataDir>' backrefs=yes
+  notify: restart dovecot
+- name: Enable Solr plugin
+  lineinfile: dest=/etc/dovecot/conf.d/20-imap.conf regexp='^( *)#?mail_plugins(.+)$' line='\1mail_plugins\2 fts fts_solr' backrefs=yes
+  notify: restart dovecot
+- name: Copy config for Solr plugin
+  copy: src=90-plugin.conf dest=/etc/dovecot/conf.d/90-plugin.conf
+  notify: restart dovecot

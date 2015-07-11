@@ -1,0 +1,8 @@
+---
+- hosts: all
+  gather_facts: no
+  vars:
+     mail_domain: stefansk.name
+     mailserver_name: mail.stefansk.name
+  roles:
+     - mailserver
