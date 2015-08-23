@@ -47,7 +47,7 @@
 - name: Generate certificates for mail server
   command: openssl req -new -x509 -days 1000 -nodes -subj "/C=AU/ST=Victoria/L=Melbourne/O=IT/CN={{mailserver_name}}" -out "/etc/ssl/certs/dovecot.pem" -keyout "/etc/ssl/private/dovecot.pem" creates=/etc/ssl/private/dovecot.pem
 - name: Set Dovecot mail box location
-  lineinfile: dest=/etc/dovecot/conf.d/10-mail.conf regexp='^mail_location' line='mail_location = maildir:/var/mailstore/dovecot'
+  lineinfile: dest=/etc/dovecot/conf.d/10-mail.conf regexp='^mail_location' line='mail_location = maildir:/var/mailstore/dovecot/%u'
   notify: restart dovecot
 - name: Set Dovecot mail box location
   lineinfile: dest=/etc/dovecot/conf.d/10-mail.conf line='first_valid_uid = 0'
