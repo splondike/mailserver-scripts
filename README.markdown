@@ -2,7 +2,7 @@ These instructions and scripts will set you up with a functioning mail server ba
 
 ## Preparation
 
-First you will need somewhere to host the server. I used digitalocean.com.
+First you will need somewhere to host the server. I used vultr.com.
 
 How you install the server is up to you. You should set a reverse PTR address somehow though.
 

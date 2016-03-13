@@ -71,11 +71,17 @@
   copy: src=10-master.conf dest=/etc/dovecot/conf.d/10-master.conf
   notify: restart dovecot
 - name: Update Dovecot SSL pubkey location
-  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf regexp='^ssl_cert' line='ssl_cert = </etc/ssl/certs/dovecot.pem'
+  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf regexp='^#?ssl_cert' line='ssl_cert = </etc/ssl/certs/dovecot.pem'
 - name: Update Dovecot SSL privkey location
-  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf regexp='^ssl_key' line='ssl_key = </etc/ssl/private/dovecot.pem'
+  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf regexp='^#?ssl_key' line='ssl_key = </etc/ssl/private/dovecot.pem'
 - name: Force SSL in Dovecot
-  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf line='ssl = required'
+  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf regexp='^#?ssl = ' line='ssl = required'
+  notify: restart dovecot
+- name: Disable older SSL/TLS protocols in Dovecot
+  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf regexp='^#?ssl_protocols' line='ssl_protocols = !SSLv2 !SSLv3 !TLSv1'
+  notify: restart dovecot
+- name: Disable less secure cipher suites in Dovecot
+  lineinfile: dest=/etc/dovecot/conf.d/10-ssl.conf regexp='^#?ssl_cipher_list' line='ssl_cipher_list = ALL:HIGH:!SSLv2:!MEDIUM:!LOW:!EXP:!RC4:!MD5:!aNULL:!3DES'
   notify: restart dovecot
 - name: Set postmaster address in Dovecot
   lineinfile: dest=/etc/dovecot/conf.d/15-lda.conf regexp='#?postmaster_address' line='postmaster_address = postmaster@{{mail_domain}}'
