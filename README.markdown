@@ -1,3 +1,8 @@
+**I no longer use this setup.** After a few years of running it successfully I found that my mail had started to consistently end up in people's Junk folders despite me having valid SPF, DKIM, and DMARC records. After some investigation using http://dkimvalidator.com/ it looks like the problem was I didn't have any kind of SMTP server reputation (e.g. at http://www.dnswl.org/). If you want to run your own mailserver, in addition to the steps below, you should test with the major email providers, and probably try and get yourself a positive reputation (e.g. by registering at dnswl).
+
+---
+
+
 These instructions and scripts will set you up with a functioning mail server based on Debian 8.
 
 ## Preparation
